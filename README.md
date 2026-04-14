@@ -16,14 +16,14 @@ A modern, full-stack attendance management system with automated defaulter track
 ## 🛠️ Technology Stack
 
 -   **Frontend**: React, Vite, Chart.js, React-Icons, Axios.
--   **Backend**: Node.js, Express, MongoDB, Mongoose.
+-   **Backend**: Node.js, Express, MySQL, Sequelize.
 -   **Authentication**: JWT-based role-based access control.
 
 ## 💻 Setup Instructions
 
 ### 1. Prerequisites
 -   Node.js installed.
--   MongoDB running locally on `mongodb://localhost:27017/school_management`.
+-   MySQL running locally with your database configured.
 
 ### 2. Backend Setup
 ```bash
