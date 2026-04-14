@@ -1,20 +1,25 @@
 const bcrypt = require('bcrypt');
-const User = require('../models/User');
-const Student = require('../models/Student');
-const Attendance = require('../models/Attendance');
+const { pool } = require('../config/db');
 
 // @route GET /api/students
 const getStudents = async (req, res) => {
   try {
-    const students = await Student.find().populate('user_id', 'username');
+    const [students] = await pool.execute(`
+      SELECT s.id, s.name, s.roll_number, s.class, s.section, u.username
+      FROM students s
+      LEFT JOIN users u ON s.user_id = u.id
+    `);
+    
+    // Formatting perfectly for frontend
     const result = students.map(s => ({
-      id: s._id,
+      id: s.id,
       name: s.name,
       roll_number: s.roll_number,
       class: s.class,
       section: s.section,
-      username: s.user_id?.username || '',
+      username: s.username || '',
     }));
+    
     res.json(result);
   } catch (error) {
     console.error('Error fetching students:', error);
@@ -27,33 +32,34 @@ const addStudent = async (req, res) => {
   try {
     const { name, roll_number, className, section, username, password } = req.body;
 
-    // Check duplicates
-    const existingUser = await User.findOne({ username });
-    if (existingUser) return res.status(400).json({ message: 'Username already exists' });
+    const [existingUser] = await pool.execute('SELECT id FROM users WHERE username = ?', [username]);
+    if (existingUser.length > 0) return res.status(400).json({ message: 'Username already exists' });
 
-    const existingStudent = await Student.findOne({ roll_number });
-    if (existingStudent) return res.status(400).json({ message: 'Roll number already exists' });
+    const [existingStudent] = await pool.execute('SELECT id FROM students WHERE roll_number = ?', [roll_number]);
+    if (existingStudent.length > 0) return res.status(400).json({ message: 'Roll number already exists' });
 
-    // Create user account
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
-    const user = await User.create({ username, password_hash, role: 'User' });
+    
+    // Create user account
+    const [userResult] = await pool.execute(
+      'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+      [username, password_hash, 'User']
+    );
+    const user_id = userResult.insertId;
 
     // Create student record
-    const student = await Student.create({
-      user_id: user._id,
+    const [studentResult] = await pool.execute(
+      'INSERT INTO students (user_id, name, roll_number, class, section) VALUES (?, ?, ?, ?, ?)',
+      [user_id, name, roll_number, className, section]
+    );
+
+    res.status(201).json({
+      id: studentResult.insertId,
       name,
       roll_number,
       class: className,
       section,
-    });
-
-    res.status(201).json({
-      id: student._id,
-      name: student.name,
-      roll_number: student.roll_number,
-      class: student.class,
-      section: student.section,
     });
   } catch (error) {
     console.error('Error adding student:', error);
@@ -65,14 +71,14 @@ const addStudent = async (req, res) => {
 const updateStudent = async (req, res) => {
   try {
     const { name, roll_number, className, section } = req.body;
+    const { id } = req.params;
 
-    const student = await Student.findByIdAndUpdate(
-      req.params.id,
-      { name, roll_number, class: className, section },
-      { new: true }
+    const [result] = await pool.execute(
+      'UPDATE students SET name = ?, roll_number = ?, class = ?, section = ? WHERE id = ?',
+      [name, roll_number, className, section, id]
     );
 
-    if (!student) return res.status(404).json({ message: 'Student not found' });
+    if (result.affectedRows === 0) return res.status(404).json({ message: 'Student not found' });
 
     res.json({ message: 'Student updated successfully' });
   } catch (error) {
@@ -84,13 +90,18 @@ const updateStudent = async (req, res) => {
 // @route DELETE /api/students/:id
 const deleteStudent = async (req, res) => {
   try {
-    const student = await Student.findById(req.params.id);
-    if (!student) return res.status(404).json({ message: 'Student not found' });
+    const { id } = req.params;
+    const [studentRows] = await pool.execute('SELECT user_id FROM students WHERE id = ?', [id]);
+    
+    if (studentRows.length === 0) return res.status(404).json({ message: 'Student not found' });
+    const student = studentRows[0];
 
-    // Delete related records
-    await Attendance.deleteMany({ student_id: student._id });
-    if (student.user_id) await User.findByIdAndDelete(student.user_id);
-    await Student.findByIdAndDelete(student._id);
+    // Deleting the user automatically deletes the student and their attendance via ON DELETE CASCADE in raw SQL
+    if (student.user_id) {
+      await pool.execute('DELETE FROM users WHERE id = ?', [student.user_id]);
+    } else {
+      await pool.execute('DELETE FROM students WHERE id = ?', [id]);
+    }
 
     res.json({ message: 'Student removed successfully' });
   } catch (error) {

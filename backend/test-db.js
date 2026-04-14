@@ -1,10 +1,10 @@
-const mongoose = require('mongoose');
-const Attendance = require('./models/Attendance');
+const { pool } = require('./config/db');
 
-mongoose.connect('mongodb://localhost:27017/school_management').then(async () => {
-  const records = await Attendance.find({});
+pool.execute('SELECT * FROM attendances LIMIT 1').then(async () => {
+  console.log('Connection successful using raw mysql2 pool!');
+  const [records] = await pool.execute('SELECT * FROM attendances');
   console.log(records);
-  mongoose.connection.close();
+  process.exit(0);
 }).catch(err => {
   console.error(err);
   process.exit(1);

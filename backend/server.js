@@ -1,12 +1,12 @@
 const express = require('express');
 const cors = require('cors');
-const connectDB = require('./config/db');
+const { connectDB } = require('./config/db');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB
+// Connect to MySQL
 connectDB();
 
 // Middleware
@@ -15,7 +15,7 @@ app.use(express.json());
 
 // Test Route
 app.get('/', (req, res) => {
-  res.send('School Management System API is running (MongoDB)');
+  res.send('School Management System API is running ');
 });
 
 // Import Routes

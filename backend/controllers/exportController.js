@@ -1,55 +1,54 @@
-const Student = require('../models/Student');
-const Attendance = require('../models/Attendance');
+const { pool } = require('../config/db');
 const PDFDocument = require('pdfkit');
 const { Parser } = require('json2csv');
 
 // Helper to fetch defaulters
 const fetchDefaulters = async (startDate, endDate) => {
-  // Build date filter (as strings since DB stores as YYYY-MM-DD)
-  const dateFilter = {};
-  if (startDate || endDate) {
-    dateFilter.date = {};
-    if (startDate) dateFilter.date.$gte = startDate;
-    if (endDate) dateFilter.date.$lte = endDate;
-  }
+  const params = [];
 
-  const workingDaysQuery = (startDate || endDate) ? dateFilter : {};
-  const workingDaysAggregation = await Attendance.aggregate([
-    { $match: workingDaysQuery },
-    { $group: { _id: "$date" } },
-    { $count: "count" }
-  ]);
-  const totalWorkingDays = workingDaysAggregation.length > 0 ? workingDaysAggregation[0].count : 0;
+  let countQuery = `SELECT COUNT(DISTINCT date) as count FROM attendances WHERE 1=1`;
+  if (startDate) { countQuery += ` AND date >= ?`; params.push(startDate); }
+  if (endDate) { countQuery += ` AND date <= ?`; params.push(endDate); }
+
+  const [workingDaysResult] = await pool.execute(countQuery, params);
+  const totalWorkingDays = parseInt(workingDaysResult[0].count, 10);
 
   if (totalWorkingDays === 0) return { totalWorkingDays: 0, defaulters: [] };
 
-  const students = await Student.find({}, 'name roll_number class section');
-  const studentIds = students.map(s => s._id);
+  const [students] = await pool.execute(`SELECT id, name, roll_number, class, section FROM students`);
+  if (students.length === 0) return { totalWorkingDays, defaulters: [] };
 
-  const pipeline = [
-    { $match: { student_id: { $in: studentIds } } }
-  ];
-  if (startDate || endDate) pipeline.push({ $match: { date: dateFilter.date } });
+  const studentIds = students.map(s => s.id);
+  const placeholders = studentIds.map(() => '?').join(',');
 
-  pipeline.push({
-    $group: {
-      _id: { student_id: "$student_id", subject: "$subject" },
-      presentCount: { $sum: { $cond: [{ $eq: ["$status", "Present"] }, 1, 0] } },
-      totalCount: { $sum: 1 },
-      workingDates: { $addToSet: "$date" }
-    }
-  });
+  let statsQuery = `
+    SELECT 
+      student_id, 
+      subject, 
+      SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) AS presentCount,
+      COUNT(*) AS totalCount,
+      COUNT(DISTINCT date) as workingDatesCount
+    FROM attendances
+    WHERE student_id IN (${placeholders})
+  `;
+  const statsParams = [...studentIds];
 
-  const stats = await Attendance.aggregate(pipeline);
+  if (startDate) { statsQuery += ` AND date >= ?`; statsParams.push(startDate); }
+  if (endDate) { statsQuery += ` AND date <= ?`; statsParams.push(endDate); }
+
+  statsQuery += ` GROUP BY student_id, subject`;
+
+  const [stats] = await pool.execute(statsQuery, statsParams);
   const defaulters = [];
 
   for (const stat of stats) {
-    const student = students.find(s => s._id.toString() === stat._id.student_id.toString());
+    const student = students.find(s => s.id === stat.student_id);
     if (!student) continue;
     
-    const totalClasses = stat.totalCount;
+    const totalClasses = parseInt(stat.totalCount, 10);
+    const presentCount = parseInt(stat.presentCount, 10);
     const percentage = totalClasses > 0 
-      ? parseFloat(((stat.presentCount / totalClasses) * 100).toFixed(2)) 
+      ? parseFloat(((presentCount / totalClasses) * 100).toFixed(2)) 
       : 0;
       
     if (percentage < 75) {
@@ -58,10 +57,10 @@ const fetchDefaulters = async (startDate, endDate) => {
         roll_number: student.roll_number,
         class: student.class,
         section: student.section,
-        subject: stat._id.subject,
-        classes_attended: stat.presentCount,
+        subject: stat.subject,
+        classes_attended: presentCount,
         total_classes: totalClasses,
-        working_days: stat.workingDates.length,
+        working_days: parseInt(stat.workingDatesCount, 10),
         percentage
       });
     }
