@@ -1,7 +1,9 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'https://student-attendance-backend-875k.onrender.com/api',
+  baseURL: import.meta.env.PROD 
+    ? 'https://student-attendance-backend-875k.onrender.com/api' 
+    : 'http://localhost:5000/api',
   headers: {
     'Content-Type': 'application/json',
   },

@@ -82,7 +82,9 @@ const DefaultersList = () => {
     const params = new URLSearchParams({ token });
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
-    const baseUrl = import.meta.env.VITE_API_URL || 'https://student-attendance-backend-875k.onrender.com/api';
+    const baseUrl = import.meta.env.PROD 
+      ? 'https://student-attendance-backend-875k.onrender.com/api' 
+      : 'http://localhost:5000/api';
     const url = `${baseUrl}/exports/defaulters/${format}?${params.toString()}`;
     window.open(url, '_blank');
   };
